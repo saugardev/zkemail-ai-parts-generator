@@ -1,37 +1,8 @@
-import { MultiAgentSystem, Agent } from '@/lib/agent';
+import agentsConfig from '@/config/agents';
+import { MultiAgentSystem } from '@/lib/agent';
 import { NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY!;
-
-const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
-const system = new MultiAgentSystem();
-
-// Initialize agents
-const agents = {
-  promptRefiner: new Agent({
-    name: "promptRefiner",
-    role: "prompt engineering expert",
-    systemPrompt: "You are a prompt engineering expert. Your job is to refine and improve prompts to get better results from AI models. Focus on clarity, specificity, and proper constraints."
-  }, client),
-  
-  partsExtractor: new Agent({
-    name: "partsExtractor",
-    role: "text analysis specialist",
-    systemPrompt: "You are a text analysis specialist. Extract and organize key components from text into structured formats. Focus on identifying patterns and meaningful segments."
-  }, client),
-  
-  regexGenerator: new Agent({
-    name: "regexGenerator",
-    role: "regex pattern expert",
-    systemPrompt: "You are a regex pattern expert. Create precise and efficient regular expressions based on requirements. Include explanations of pattern components."
-  }, client)
-};
-
-// Add agents to system
-Object.entries(agents).forEach(([name, agent]) => {
-  system.addAgent(agent, name);
-});
+const system = new MultiAgentSystem(agentsConfig);
 
 export async function POST(req: Request) {
   try {
@@ -44,7 +15,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!agents[agentType as keyof typeof agents]) {
+    if (!agentsConfig.agents[agentType as keyof typeof agentsConfig.agents]) {
       return NextResponse.json(
         { error: 'Invalid agent type' },
         { status: 400 }

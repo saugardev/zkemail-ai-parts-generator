@@ -79,15 +79,28 @@ interface DiscussionResult {
   error?: string;
 }
 
+interface ClientConfig {
+  type: 'anthropic';
+  apiKey: string;
+}
+
+interface SystemConfig {
+  client: ClientConfig;
+  agents: Record<string, AgentConfig>;
+}
+
 export class MultiAgentSystem {
   private agents: Map<string, Agent>;
+  private client: Anthropic;
   
-  constructor() {
+  constructor(config: SystemConfig) {
+    this.client = new Anthropic({ apiKey: config.client.apiKey });
     this.agents = new Map();
-  }
-
-  addAgent(agent: Agent, name: string): void {
-    this.agents.set(name, agent);
+    
+    Object.entries(config.agents).forEach(([name, agentConfig]) => {
+      const agent = new Agent(agentConfig, this.client);
+      this.agents.set(name, agent);
+    });
   }
 
   async facilitateDiscussion(
