@@ -3,6 +3,80 @@
 import { useState } from 'react';
 import BlueprintResponse from './blueprint-response';
 
+// UI Components
+const TextArea = ({ id, label, value, onChange }: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+}) => (
+  <div>
+    <label htmlFor={id} className="block text-sm font-medium text-gray-700">
+      {label}
+    </label>
+    <textarea
+      id={id}
+      value={value}
+      onChange={onChange}
+      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+      rows={4}
+      required
+    />
+  </div>
+);
+
+const FileInput = ({ id, label, onChange }: {
+  id: string;
+  label: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}) => (
+  <div>
+    <label htmlFor={id} className="block text-sm font-medium text-gray-700">
+      {label}
+    </label>
+    <input
+      type="file"
+      id={id}
+      accept=".eml"
+      onChange={onChange}
+      className="mt-1 block w-full"
+      required
+    />
+  </div>
+);
+
+const ProcessSection = ({ title, children, loading, onExecute }: {
+  title: string;
+  children: React.ReactNode;
+  loading: boolean;
+  onExecute: () => void;
+}) => (
+  <section className="border p-4 rounded-lg">
+    <h2 className="text-lg font-semibold mb-4">{title}</h2>
+    <div className="space-y-4">
+      {children}
+    </div>
+    <button
+      type="button"
+      onClick={onExecute}
+      disabled={loading}
+      className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+    >
+      {title.split('.')[1]}
+    </button>
+  </section>
+);
+
+const SubmitButton = ({ loading }: { loading: boolean }) => (
+  <button
+    type="submit"
+    disabled={loading}
+    className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+  >
+    {loading ? 'Processing...' : 'Run Full Process'}
+  </button>
+);
+
 export default function BlueprintGenerator() {
   // First call - Prompt Refiner
   const [promptText, setPromptText] = useState('');
@@ -23,14 +97,17 @@ export default function BlueprintGenerator() {
   const handlePromptRefiner = async () => {
     setLoading(true);
     try {
-      const refinerRes = await fetch('/api/prompt-refiner', {
+      const refinerRes = await fetch('/api/agents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: promptText }),
+        body: JSON.stringify({ 
+          prompt: promptText,
+          agentType: 'promptRefiner'
+        }),
       });
-      const refinedPromptResult = await refinerRes.json();
-      setRefinedPrompt(refinedPromptResult);
-      setRegexPrompt(refinedPromptResult); // Pre-fill for next step
+      const { result } = await refinerRes.json();
+      setRefinedPrompt(result[0]);
+      setRegexPrompt(result[0]); 
     } catch (error) {
       console.error('Error:', error);
     } finally {
@@ -41,17 +118,30 @@ export default function BlueprintGenerator() {
   const handlePartsExtractor = async () => {
     setLoading(true);
     try {
-      const formData = new FormData();
-      formData.append('instructions', instructions || refinedPrompt); // Use previous result if available
-      if (emlFile) formData.append('file', emlFile);
+      // Convert file to base64 if it exists
+      let fileData = '';
+      if (emlFile) {
+        fileData = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(emlFile);
+        });
+      }
 
-      const extractorRes = await fetch('/api/parts-extractor', {
+      const extractorRes = await fetch('/api/agents', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: JSON.stringify({
+            instructions: instructions || refinedPrompt,
+            fileContent: fileData
+          }),
+          agentType: 'partsExtractor'
+        }),
       });
-      const extractedPartsResult = await extractorRes.json();
-      setExtractedParts(extractedPartsResult);
-      setParts(extractedPartsResult); // Pre-fill for next step
+      const { result } = await extractorRes.json();
+      setExtractedParts(result[0]);
+      setParts(result[0]);
     } catch (error) {
       console.error('Error:', error);
     } finally {
@@ -62,16 +152,19 @@ export default function BlueprintGenerator() {
   const handleRegexGenerator = async () => {
     setLoading(true);
     try {
-      const regexRes = await fetch('/api/regex-generator', {
+      const regexRes = await fetch('/api/agents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          parts: parts || extractedParts, // Use previous result if available
-          refinedPrompt: regexPrompt || refinedPrompt
+          prompt: JSON.stringify({
+            parts: parts || extractedParts,
+            refinedPrompt: regexPrompt || refinedPrompt
+          }),
+          agentType: 'regexGenerator'
         }),
       });
-      const regexPatterns = await regexRes.json();
-      setResult(JSON.stringify(regexPatterns, null, 2));
+      const { result } = await regexRes.json();
+      setResult(result[0]);
     } catch (error) {
       console.error('Error:', error);
     } finally {
@@ -91,120 +184,59 @@ export default function BlueprintGenerator() {
       <div className="w-1/2">
         <form onSubmit={handleFullProcess} className="space-y-8">
           {/* First Call Section */}
-          <section className="border p-4 rounded-lg">
-            <h2 className="text-lg font-semibold mb-4">1. Prompt Refiner</h2>
-            <div>
-              <label htmlFor="promptText" className="block text-sm font-medium text-gray-700">
-                Text to Refine
-              </label>
-              <textarea
-                id="promptText"
-                value={promptText}
-                onChange={(e) => setPromptText(e.target.value)}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                rows={4}
-                required
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handlePromptRefiner}
-              disabled={loading}
-              className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-            >
-              Refine Prompt
-            </button>
-          </section>
+          <ProcessSection
+            title="1. Prompt Refiner"
+            loading={loading}
+            onExecute={handlePromptRefiner}
+          >
+            <TextArea
+              id="promptText"
+              label="Text to Refine"
+              value={promptText}
+              onChange={(e) => setPromptText(e.target.value)}
+            />
+          </ProcessSection>
 
           {/* Second Call Section */}
-          <section className="border p-4 rounded-lg">
-            <h2 className="text-lg font-semibold mb-4">2. Parts Extractor</h2>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="instructions" className="block text-sm font-medium text-gray-700">
-                  Instructions
-                </label>
-                <textarea
-                  id="instructions"
-                  value={instructions || refinedPrompt}
-                  onChange={(e) => setInstructions(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  rows={4}
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="emlFile" className="block text-sm font-medium text-gray-700">
-                  EML File
-                </label>
-                <input
-                  type="file"
-                  id="emlFile"
-                  accept=".eml"
-                  onChange={(e) => setEmlFile(e.target.files?.[0] || null)}
-                  className="mt-1 block w-full"
-                  required
-                />
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={handlePartsExtractor}
-              disabled={loading}
-              className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-            >
-              Extract Parts
-            </button>
-          </section>
+          <ProcessSection
+            title="2. Parts Extractor"
+            loading={loading}
+            onExecute={handlePartsExtractor}
+          >
+            <TextArea
+              id="instructions"
+              label="Instructions"
+              value={instructions || refinedPrompt}
+              onChange={(e) => setInstructions(e.target.value)}
+            />
+            <FileInput
+              id="emlFile"
+              label="EML File"
+              onChange={(e) => setEmlFile(e.target.files?.[0] || null)}
+            />
+          </ProcessSection>
 
           {/* Third Call Section */}
-          <section className="border p-4 rounded-lg">
-            <h2 className="text-lg font-semibold mb-4">3. Regex Generator</h2>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="parts" className="block text-sm font-medium text-gray-700">
-                  Parts
-                </label>
-                <textarea
-                  id="parts"
-                  value={parts || extractedParts}
-                  onChange={(e) => setParts(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  rows={4}
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="regexPrompt" className="block text-sm font-medium text-gray-700">
-                  Regex Prompt
-                </label>
-                <textarea
-                  id="regexPrompt"
-                  value={regexPrompt || refinedPrompt}
-                  onChange={(e) => setRegexPrompt(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  rows={4}
-                  required
-                />
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={handleRegexGenerator}
-              disabled={loading}
-              className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-            >
-              Generate Regex
-            </button>
-          </section>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+          <ProcessSection
+            title="3. Regex Generator"
+            loading={loading}
+            onExecute={handleRegexGenerator}
           >
-            {loading ? 'Processing...' : 'Run Full Process'}
-          </button>
+            <TextArea
+              id="parts"
+              label="Parts"
+              value={parts || extractedParts}
+              onChange={(e) => setParts(e.target.value)}
+            />
+            <TextArea
+              id="regexPrompt"
+              label="Regex Prompt"
+              value={regexPrompt || refinedPrompt}
+              onChange={(e) => setRegexPrompt(e.target.value)}
+            />
+          </ProcessSection>
+
+          <SubmitButton loading={loading} />
         </form>
       </div>
 
